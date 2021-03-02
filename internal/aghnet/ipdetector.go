@@ -1,73 +1,160 @@
 package aghnet
 
-import "net"
+import (
+	"net"
+	"sync"
+)
 
 // IPDetector describes IP address properties.
 type IPDetector struct {
-	nets []*net.IPNet
+	// spNets is the slice of special-purpose address registries as defined
+	// by RFC-6890 (https://tools.ietf.org/html/rfc6890).
+	spNets   []*net.IPNet
+	spNetsMu sync.Mutex
+
+	// locServedNets is the slice of locally-served networks as defined by
+	// RFC-6303 (https://tools.ietf.org/html/rfc6303).
+	locServedNets   []*net.IPNet
+	locServedNetsMu sync.Mutex
 }
 
 // NewIPDetector returns a new IP detector.
 func NewIPDetector() (ipd *IPDetector, err error) {
-	specialNetworks := []string{
+	spNets := []string{
+		// "This" network.
 		"0.0.0.0/8",
+		// Private-Use Networks.
 		"10.0.0.0/8",
+		// Shared Address Space.
 		"100.64.0.0/10",
+		// Loopback.
 		"127.0.0.0/8",
+		// Link Local.
 		"169.254.0.0/16",
+		// Private-Use Networks.
 		"172.16.0.0/12",
+		// IETF Protocol Assignments.
 		"192.0.0.0/24",
+		// DS-Lite.
 		"192.0.0.0/29",
+		// TEST-NET-1
 		"192.0.2.0/24",
+		// 6to4 Relay Anycast.
 		"192.88.99.0/24",
+		// Private-Use Networks.
 		"192.168.0.0/16",
+		// Network Interconnect Device Benchmark Testing.
 		"198.18.0.0/15",
+		// TEST-NET-2.
 		"198.51.100.0/24",
+		// TEST-NET-3.
 		"203.0.113.0/24",
+		// Reserved for Future Use.
 		"240.0.0.0/4",
+		// Limited Broadcast.
 		"255.255.255.255/32",
+
+		// Loopback.
 		"::1/128",
+		// Unspecified.
 		"::/128",
+		// IPv4-IPv6 Translation Address.
 		"64:ff9b::/96",
-		// Since this network is used for mapping IPv4 addresses, we
-		// don't include it.
+
+		// IPv4-Mapped Address.  Since this network is used for mapping
+		// IPv4 addresses, we don't include it.
 		// "::ffff:0:0/96",
+
+		// Discard-Only Prefix.
 		"100::/64",
+		// IETF Protocol Assignments.
 		"2001::/23",
+		// TEREDO.
 		"2001::/32",
+		// Benchmarking.
 		"2001:2::/48",
+		// Documentation.
 		"2001:db8::/32",
+		// ORCHID.
 		"2001:10::/28",
+		// 6to4.
 		"2002::/16",
+		// Unique-Local.
 		"fc00::/7",
+		// Linked-Scoped Unicast.
 		"fe80::/10",
 	}
 
-	ipd = &IPDetector{
-		nets: make([]*net.IPNet, len(specialNetworks)),
+	// TODO(e.burkov): It's a subslice of the slice above.  Should be done
+	// smarter.
+	locServedNets := []string{
+		// IPv4.
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"192.0.2.0/24",
+		"198.51.100.0/24",
+		"203.0.113.0/24",
+		"255.255.255.255/32",
+		// IPv6.
+		"::/128",
+		"::1/128",
+		"fe80::/10",
+		"2001:db8::/32",
 	}
-	for i, ipnetStr := range specialNetworks {
+
+	ipd = &IPDetector{
+		spNets:        make([]*net.IPNet, len(spNets)),
+		locServedNets: make([]*net.IPNet, len(locServedNets)),
+	}
+	for i, ipnetStr := range spNets {
 		var ipnet *net.IPNet
 		_, ipnet, err = net.ParseCIDR(ipnetStr)
 		if err != nil {
 			return nil, err
 		}
 
-		ipd.nets[i] = ipnet
+		ipd.spNets[i] = ipnet
+	}
+	for i, ipnetStr := range locServedNets {
+		var ipnet *net.IPNet
+		_, ipnet, err = net.ParseCIDR(ipnetStr)
+		if err != nil {
+			return nil, err
+		}
+
+		ipd.locServedNets[i] = ipnet
 	}
 
 	return ipd, nil
 }
 
-// DetectSpecialNetwork returns true if IP address is contained by any of
-// special-purpose IP address registries according to RFC-6890
-// (https://tools.ietf.org/html/rfc6890).
-func (ipd *IPDetector) DetectSpecialNetwork(ip net.IP) bool {
-	for _, ipnet := range ipd.nets {
+// detectLocked ranges through the given ipnets slice searching for the one
+// which contains the ip.  For internal use only.
+func detectLocked(ipnets *[]*net.IPNet, ip net.IP) (is bool) {
+	for _, ipnet := range *ipnets {
 		if ipnet.Contains(ip) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// DetectSpecialNetwork returns true if IP address is contained by any of
+// special-purpose IP address registries.  It's safe for concurrent use.
+func (ipd *IPDetector) DetectSpecialNetwork(ip net.IP) (is bool) {
+	ipd.spNetsMu.Lock()
+	defer ipd.spNetsMu.Unlock()
+	return detectLocked(&ipd.spNets, ip)
+}
+
+// DetectLocallyServedNetwork returns true if IP address is contained by any of
+// locally-served IP address registries.  It's safe for concurrent use.
+func (ipd *IPDetector) DetectLocallyServedNetwork(ip net.IP) (is bool) {
+	ipd.locServedNetsMu.Lock()
+	defer ipd.locServedNetsMu.Unlock()
+	return detectLocked(&ipd.locServedNets, ip)
 }

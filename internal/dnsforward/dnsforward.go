@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/dhcpd"
 	"github.com/AdguardTeam/AdGuardHome/internal/dnsfilter"
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
@@ -56,7 +57,8 @@ type Server struct {
 	stats      stats.Stats
 	access     *accessCtx
 
-	ipset ipsetCtx
+	ipset      ipsetCtx
+	ipDetector *aghnet.IPDetector
 
 	tableHostToIP     map[string]net.IP // "hostname -> IP" table for internal addresses (DHCP)
 	tableHostToIPLock sync.Mutex
@@ -80,15 +82,17 @@ type DNSCreateParams struct {
 	Stats      stats.Stats
 	QueryLog   querylog.QueryLog
 	DHCPServer dhcpd.ServerInterface
+	IPDetector *aghnet.IPDetector
 }
 
 // NewServer creates a new instance of the dnsforward.Server
 // Note: this function must be called only once
 func NewServer(p DNSCreateParams) *Server {
 	s := &Server{
-		dnsFilter: p.DNSFilter,
-		stats:     p.Stats,
-		queryLog:  p.QueryLog,
+		dnsFilter:  p.DNSFilter,
+		stats:      p.Stats,
+		queryLog:   p.QueryLog,
+		ipDetector: p.IPDetector,
 	}
 
 	if p.DHCPServer != nil {
@@ -159,6 +163,7 @@ func (s *Server) Resolve(host string) ([]net.IPAddr, error) {
 // Query log and Stats are not updated.
 // This method may be called before Start().
 func (s *Server) Exchange(req *dns.Msg) (*dns.Msg, error) {
+	log.Debug("INTERNAL PROXY RESOLVES")
 	s.RLock()
 	defer s.RUnlock()
 

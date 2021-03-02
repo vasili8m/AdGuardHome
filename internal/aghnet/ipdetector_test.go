@@ -8,11 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIPDetector_detectSpecialNetwork(t *testing.T) {
-	var ipd *IPDetector
-	var err error
-
-	ipd, err = NewIPDetector()
+func TestIPDetector_DetectSpecialNetwork(t *testing.T) {
+	ipd, err := NewIPDetector()
 	require.Nil(t, err)
 
 	testCases := []struct {
@@ -141,5 +138,109 @@ func TestIPDetector_detectSpecialNetwork(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, ipd.DetectSpecialNetwork(tc.ip))
 		})
+	}
+}
+
+func TestIPDetector_DetectLocallyServedNetwork(t *testing.T) {
+	ipd, err := NewIPDetector()
+	require.Nil(t, err)
+
+	testCases := []struct {
+		name string
+		ip   net.IP
+		want bool
+	}{{
+		name: "not_specific",
+		ip:   net.ParseIP("8.8.8.8"),
+		want: false,
+	}, {
+		name: "private-Use",
+		ip:   net.ParseIP("10.0.0.0"),
+		want: true,
+	}, {
+		name: "loopback",
+		ip:   net.ParseIP("127.0.0.0"),
+		want: true,
+	}, {
+		name: "link_local",
+		ip:   net.ParseIP("169.254.0.0"),
+		want: true,
+	}, {
+		name: "private-use",
+		ip:   net.ParseIP("172.16.0.0"),
+		want: true,
+	}, {
+		name: "documentation_(test-net-1)",
+		ip:   net.ParseIP("192.0.2.0"),
+		want: true,
+	}, {
+		name: "private-use",
+		ip:   net.ParseIP("192.168.0.0"),
+		want: true,
+	}, {
+		name: "documentation_(test-net-2)",
+		ip:   net.ParseIP("198.51.100.0"),
+		want: true,
+	}, {
+		name: "documentation_(test-net-3)",
+		ip:   net.ParseIP("203.0.113.0"),
+		want: true,
+	}, {
+		name: "limited_broadcast",
+		ip:   net.ParseIP("255.255.255.255"),
+		want: true,
+	}, {
+		name: "loopback_address",
+		ip:   net.ParseIP("::1"),
+		want: true,
+	}, {
+		name: "unspecified_address",
+		ip:   net.ParseIP("::"),
+		want: true,
+	}, {
+		name: "documentation",
+		ip:   net.ParseIP("2001:db8::"),
+		want: true,
+	}, {
+		name: "linked-scoped_unicast",
+		ip:   net.ParseIP("fe80::"),
+		want: true,
+	}}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ipd.DetectLocallyServedNetwork(tc.ip))
+		})
+	}
+}
+
+func TestIPDetector_Detect_parallel(t *testing.T) {
+	t.Parallel()
+
+	ipd, err := NewIPDetector()
+	require.Nil(t, err)
+
+	testFunc := func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			for _, ip := range []net.IP{
+				net.IPv4allrouter,
+				net.IPv4allsys,
+				net.IPv4bcast,
+				net.IPv4zero,
+				net.IPv6interfacelocalallnodes,
+				net.IPv6linklocalallnodes,
+				net.IPv6linklocalallrouters,
+				net.IPv6loopback,
+				net.IPv6unspecified,
+			} {
+				ipd.DetectSpecialNetwork(ip)
+				ipd.DetectLocallyServedNetwork(ip)
+			}
+		})
+	}
+
+	const goroutinesNum = 50
+	for i := 0; i < goroutinesNum; i++ {
+		go testFunc(t)
 	}
 }

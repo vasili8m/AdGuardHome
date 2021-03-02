@@ -67,9 +67,10 @@ func initDNSServer() error {
 	Context.dnsFilter = dnsfilter.New(&filterConf, nil)
 
 	p := dnsforward.DNSCreateParams{
-		DNSFilter: Context.dnsFilter,
-		Stats:     Context.stats,
-		QueryLog:  Context.queryLog,
+		DNSFilter:  Context.dnsFilter,
+		Stats:      Context.stats,
+		QueryLog:   Context.queryLog,
+		IPDetector: Context.ipDetector,
 	}
 	if Context.dhcpServer != nil {
 		p.DHCPServer = Context.dhcpServer
@@ -102,14 +103,15 @@ func isRunning() bool {
 func onDNSRequest(d *proxy.DNSContext) {
 	ip := dnsforward.IPFromAddr(d.Addr)
 	if ip == nil {
-		// This would be quite weird if we get here
+		// This would be quite weird if we get here.
 		return
 	}
 
-	if !ip.IsLoopback() {
+	ipd := Context.ipDetector
+	if !ipd.DetectLocallyServedNetwork(ip) {
 		Context.rdns.Begin(ip)
 	}
-	if !Context.ipDetector.DetectSpecialNetwork(ip) {
+	if !ipd.DetectSpecialNetwork(ip) {
 		Context.whois.Begin(ip)
 	}
 }
@@ -341,7 +343,7 @@ func startDNSServer() error {
 
 	const topClientsNumber = 100 // the number of clients to get
 	for _, ip := range Context.stats.GetTopClientsIP(topClientsNumber) {
-		if !ip.IsLoopback() {
+		if !Context.ipDetector.DetectLocallyServedNetwork(ip) {
 			Context.rdns.Begin(ip)
 		}
 		if !Context.ipDetector.DetectSpecialNetwork(ip) {

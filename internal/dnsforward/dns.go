@@ -77,6 +77,7 @@ func (s *Server) handleDNSRequest(_ *proxy.Proxy, d *proxy.DNSContext) error {
 		processInitial,
 		processInternalHosts,
 		processInternalIPAddrs,
+		processLocalPTR,
 		processClientID,
 		processFilteringBeforeRequest,
 		processUpstream,
@@ -260,16 +261,46 @@ func processInternalIPAddrs(ctx *dnsContext) (rc resultCode) {
 	log.Debug("DNS: reverse-lookup: %s -> %s", arpa, host)
 
 	resp := s.makeResponse(req)
-	ptr := &dns.PTR{}
-	ptr.Hdr = dns.RR_Header{
-		Name:   req.Question[0].Name,
-		Rrtype: dns.TypePTR,
-		Ttl:    s.conf.BlockedResponseTTL,
-		Class:  dns.ClassINET,
+	ptr := &dns.PTR{
+		Hdr: dns.RR_Header{
+			Name:   req.Question[0].Name,
+			Rrtype: dns.TypePTR,
+			Ttl:    s.conf.BlockedResponseTTL,
+			Class:  dns.ClassINET,
+		},
+		Ptr: host + ".",
 	}
-	ptr.Ptr = host + "."
+
 	resp.Answer = append(resp.Answer, ptr)
 	ctx.proxyCtx.Res = resp
+	return resultCodeSuccess
+}
+
+// processLocalPTR responds to PTR requests if the target IP is detected to be
+// inside the local network.
+func processLocalPTR(ctx *dnsContext) (rc resultCode) {
+	d := ctx.proxyCtx
+	if d.Res != nil {
+		return resultCodeSuccess
+	}
+
+	req := ctx.proxyCtx.Req
+	if req.Question[0].Qtype != dns.TypePTR {
+		return resultCodeSuccess
+	}
+	// The address wasn't resolved by DHCP because it is not enabled.
+
+	// arpa := req.Question[0].Name
+	// target := util.DNSUnreverseAddr(arpa)
+	// s := ctx.srv
+	// if !s.ipDetector.DetectLocallyServedNetwork(target) {
+	// 	return resultCodeSuccess
+	// }
+	// Try to resolve with local resolver.
+
+	// TODO(e.burkov): Prepend the address of local resolver from the
+	// configuration, when it will be added.
+
 	return resultCodeSuccess
 }
 
@@ -335,6 +366,7 @@ func processUpstream(ctx *dnsContext) (rc resultCode) {
 	}
 
 	// request was not filtered so let it be processed further
+	log.Debug("THE REQUEST GONNA BE SENT TO UPSTREAM: %s", d.Req.Question[0].String())
 	err := s.dnsProxy.Resolve(d)
 	if err != nil {
 		ctx.err = err
