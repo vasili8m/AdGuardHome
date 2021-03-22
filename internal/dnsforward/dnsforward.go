@@ -57,8 +57,9 @@ type Server struct {
 	stats      stats.Stats
 	access     *accessCtx
 
-	ipset      ipsetCtx
-	ipDetector *aghnet.IPDetector
+	ipset           ipsetCtx
+	ipDetector      *aghnet.IPDetector
+	systemResolvers aghnet.SystemResolvers
 
 	tableHostToIP     map[string]net.IP // "hostname -> IP" table for internal addresses (DHCP)
 	tableHostToIPLock sync.Mutex
@@ -78,21 +79,23 @@ type Server struct {
 
 // DNSCreateParams - parameters for NewServer()
 type DNSCreateParams struct {
-	DNSFilter  *dnsfilter.DNSFilter
-	Stats      stats.Stats
-	QueryLog   querylog.QueryLog
-	DHCPServer dhcpd.ServerInterface
-	IPDetector *aghnet.IPDetector
+	DNSFilter       *dnsfilter.DNSFilter
+	Stats           stats.Stats
+	QueryLog        querylog.QueryLog
+	DHCPServer      dhcpd.ServerInterface
+	IPDetector      *aghnet.IPDetector
+	SystemResolvers aghnet.SystemResolvers
 }
 
 // NewServer creates a new instance of the dnsforward.Server
 // Note: this function must be called only once
 func NewServer(p DNSCreateParams) *Server {
 	s := &Server{
-		dnsFilter:  p.DNSFilter,
-		stats:      p.Stats,
-		queryLog:   p.QueryLog,
-		ipDetector: p.IPDetector,
+		dnsFilter:       p.DNSFilter,
+		stats:           p.Stats,
+		queryLog:        p.QueryLog,
+		ipDetector:      p.IPDetector,
+		systemResolvers: p.SystemResolvers,
 	}
 
 	if p.DHCPServer != nil {

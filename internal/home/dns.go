@@ -67,10 +67,11 @@ func initDNSServer() error {
 	Context.dnsFilter = dnsfilter.New(&filterConf, nil)
 
 	p := dnsforward.DNSCreateParams{
-		DNSFilter:  Context.dnsFilter,
-		Stats:      Context.stats,
-		QueryLog:   Context.queryLog,
-		IPDetector: Context.ipDetector,
+		DNSFilter:       Context.dnsFilter,
+		Stats:           Context.stats,
+		QueryLog:        Context.queryLog,
+		IPDetector:      Context.ipDetector,
+		SystemResolvers: Context.systemResolvers,
 	}
 	if Context.dhcpServer != nil {
 		p.DHCPServer = Context.dhcpServer

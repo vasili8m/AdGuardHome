@@ -61,7 +61,8 @@ type homeContext struct {
 	autoHosts  util.AutoHosts       // IP-hostname pairs taken from system configuration (e.g. /etc/hosts) files
 	updater    *updater.Updater
 
-	ipDetector *aghnet.IPDetector
+	ipDetector      *aghnet.IPDetector
+	systemResolvers aghnet.SystemResolvers
 
 	// mux is our custom http.ServeMux.
 	mux *http.ServeMux
@@ -307,6 +308,13 @@ func run(args options) {
 
 	Context.ipDetector, err = aghnet.NewIPDetector()
 	if err != nil {
+		log.Fatal(err)
+	}
+
+	Context.systemResolvers, err = aghnet.NewSystemResolvers(0, nil)
+	if err != nil {
+		// TODO(e.burkov): Think if we really need fatal here since
+		// local resolvers may be also configured via configuration.
 		log.Fatal(err)
 	}
 

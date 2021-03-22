@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtest"
 	"github.com/AdguardTeam/AdGuardHome/internal/util"
 
@@ -65,7 +66,19 @@ func createTestServer(t *testing.T, filterConf *dnsfilter.Config, forwardConf Se
 
 	f := dnsfilter.New(filterConf, filters)
 
-	s := NewServer(DNSCreateParams{DNSFilter: f})
+	ipd, err := aghnet.NewIPDetector()
+	require.NoError(t, err)
+	require.NotNil(t, ipd)
+
+	sysRes, err := aghnet.NewSystemResolvers(0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, sysRes)
+
+	s := NewServer(DNSCreateParams{
+		DNSFilter:       f,
+		IPDetector:      ipd,
+		SystemResolvers: sysRes,
+	})
 	s.conf = forwardConf
 	require.Nil(t, s.Prepare(nil))
 
@@ -703,8 +716,18 @@ func TestBlockedCustomIP(t *testing.T) {
 		Data: []byte(rules),
 	}}
 
+	ipd, err := aghnet.NewIPDetector()
+	require.NoError(t, err)
+	require.NotNil(t, ipd)
+
+	sysRes, err := aghnet.NewSystemResolvers(0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, sysRes)
+
 	s := NewServer(DNSCreateParams{
-		DNSFilter: dnsfilter.New(&dnsfilter.Config{}, filters),
+		DNSFilter:       dnsfilter.New(&dnsfilter.Config{}, filters),
+		IPDetector:      ipd,
+		SystemResolvers: sysRes,
 	})
 	conf := &ServerConfig{
 		UDPListenAddr: &net.UDPAddr{},
@@ -822,7 +845,19 @@ func TestRewrite(t *testing.T) {
 	}
 	f := dnsfilter.New(c, nil)
 
-	s := NewServer(DNSCreateParams{DNSFilter: f})
+	ipd, err := aghnet.NewIPDetector()
+	require.NoError(t, err)
+	require.NotNil(t, ipd)
+
+	sysRes, err := aghnet.NewSystemResolvers(0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, sysRes)
+
+	s := NewServer(DNSCreateParams{
+		DNSFilter:       f,
+		IPDetector:      ipd,
+		SystemResolvers: sysRes,
+	})
 	assert.Nil(t, s.Prepare(&ServerConfig{
 		UDPListenAddr: &net.UDPAddr{},
 		TCPListenAddr: &net.TCPAddr{},
@@ -1104,9 +1139,19 @@ func (d *testDHCP) Leases(flags int) []dhcpd.Lease {
 func (d *testDHCP) SetOnLeaseChanged(onLeaseChanged dhcpd.OnLeaseChangedT) {}
 
 func TestPTRResponseFromDHCPLeases(t *testing.T) {
+	ipd, err := aghnet.NewIPDetector()
+	require.NoError(t, err)
+	require.NotNil(t, ipd)
+
+	sysRes, err := aghnet.NewSystemResolvers(0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, sysRes)
+
 	s := NewServer(DNSCreateParams{
-		DNSFilter:  dnsfilter.New(&dnsfilter.Config{}, nil),
-		DHCPServer: &testDHCP{},
+		DNSFilter:       dnsfilter.New(&dnsfilter.Config{}, nil),
+		DHCPServer:      &testDHCP{},
+		IPDetector:      ipd,
+		SystemResolvers: sysRes,
 	})
 
 	s.conf.UDPListenAddr = &net.UDPAddr{}
@@ -1153,7 +1198,20 @@ func TestPTRResponseFromHosts(t *testing.T) {
 	c.AutoHosts.Init(hf.Name())
 	t.Cleanup(c.AutoHosts.Close)
 
-	s := NewServer(DNSCreateParams{DNSFilter: dnsfilter.New(&c, nil)})
+	var ipd *aghnet.IPDetector
+	ipd, err = aghnet.NewIPDetector()
+	require.NoError(t, err)
+	require.NotNil(t, ipd)
+
+	sysRes, err := aghnet.NewSystemResolvers(0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, sysRes)
+
+	s := NewServer(DNSCreateParams{
+		DNSFilter:       dnsfilter.New(&c, nil),
+		IPDetector:      ipd,
+		SystemResolvers: sysRes,
+	})
 	s.conf.UDPListenAddr = &net.UDPAddr{}
 	s.conf.TCPListenAddr = &net.TCPAddr{}
 	s.conf.UpstreamDNS = []string{"127.0.0.1:53"}

@@ -5,10 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AdguardTeam/AdGuardHome/internal/agherr"
+	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/dhcpd"
 	"github.com/AdguardTeam/AdGuardHome/internal/dnsfilter"
-	"github.com/AdguardTeam/AdGuardHome/internal/util"
 	"github.com/AdguardTeam/dnsproxy/proxy"
+	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/log"
 	"github.com/miekg/dns"
 )
@@ -77,9 +79,9 @@ func (s *Server) handleDNSRequest(_ *proxy.Proxy, d *proxy.DNSContext) error {
 		processInitial,
 		processInternalHosts,
 		processInternalIPAddrs,
-		processLocalPTR,
 		processClientID,
 		processFilteringBeforeRequest,
+		processLocalPTR,
 		processUpstream,
 		processDNSSECAfterResponse,
 		processFilteringAfterResponse,
@@ -240,9 +242,7 @@ func processInternalIPAddrs(ctx *dnsContext) (rc resultCode) {
 	}
 
 	arpa := req.Question[0].Name
-	arpa = strings.TrimSuffix(arpa, ".")
-	arpa = strings.ToLower(arpa)
-	ip := util.DNSUnreverseAddr(arpa)
+	ip := aghnet.UnreverseAddr(arpa)
 	if ip == nil {
 		return resultCodeSuccess
 	}
@@ -276,6 +276,9 @@ func processInternalIPAddrs(ctx *dnsContext) (rc resultCode) {
 	return resultCodeSuccess
 }
 
+// DefaultLocalTimeout is the default timeout to be used for local upstreams.
+const DefaultLocalTimeout = 5 * time.Second
+
 // processLocalPTR responds to PTR requests if the target IP is detected to be
 // inside the local network.
 func processLocalPTR(ctx *dnsContext) (rc resultCode) {
@@ -284,22 +287,79 @@ func processLocalPTR(ctx *dnsContext) (rc resultCode) {
 		return resultCodeSuccess
 	}
 
-	req := ctx.proxyCtx.Req
+	req := d.Req
 	if req.Question[0].Qtype != dns.TypePTR {
 		return resultCodeSuccess
 	}
-	// The address wasn't resolved by DHCP because it is not enabled.
 
-	// arpa := req.Question[0].Name
-	// target := util.DNSUnreverseAddr(arpa)
-	// s := ctx.srv
-	// if !s.ipDetector.DetectLocallyServedNetwork(target) {
-	// 	return resultCodeSuccess
-	// }
-	// Try to resolve with local resolver.
+	target := aghnet.UnreverseAddr(req.Question[0].Name)
+	s := ctx.srv
+	if !s.ipDetector.DetectLocallyServedNetwork(target) {
+		return resultCodeSuccess
+	}
+	// The address wasn't resolved by DHCP because it is not enabled.  Start
+	// working.
 
-	// TODO(e.burkov): Prepend the address of local resolver from the
+	resolversAddrs := s.systemResolvers.Get()
+	var err error
+	if len(resolversAddrs) == 0 {
+		err = s.systemResolvers.Refresh()
+		if err != nil {
+			log.Error("dns: process local address: %s", err)
+
+			return resultCodeSuccess
+		}
+
+		resolversAddrs = s.systemResolvers.Get()
+	}
+
+	// TODO(e.burkov): Prepend the addresses of local resolvers from the
 	// configuration, when it will be added.
+	var uerrs, eerrs []error
+	for _, addr := range resolversAddrs {
+		// Check if the addr is not our own address.
+		if addr == s.dnsFilter.Config.ResolverAddress {
+			continue
+		}
+
+		var ups upstream.Upstream
+		ups, err = upstream.AddressToUpstream(
+			addr,
+			upstream.Options{
+				Timeout: DefaultLocalTimeout,
+			},
+		)
+		if err != nil {
+			uerrs = append(uerrs, err)
+
+			continue
+		}
+
+		var resp *dns.Msg
+		resp, err = ups.Exchange(req)
+		if err != nil {
+			eerrs = append(eerrs, err)
+
+			continue
+		}
+
+		// TODO(e.burkov): Maybe mark the upstreams causing errors as
+		// useless or something.
+
+		if resp != nil {
+			d.Res = resp
+
+			return resultCodeSuccess
+		}
+
+	}
+
+	if len(uerrs) > 0 {
+		log.Error("dnsforward: %s", agherr.Many("can't create upstreams", uerrs...))
+	}
+	if len(eerrs) > 0 {
+		log.Error("dnsforward: %s", agherr.Many("can't exchange with upstreams", eerrs...))
+	}
 
 	return resultCodeSuccess
 }
@@ -366,7 +426,6 @@ func processUpstream(ctx *dnsContext) (rc resultCode) {
 	}
 
 	// request was not filtered so let it be processed further
-	log.Debug("THE REQUEST GONNA BE SENT TO UPSTREAM: %s", d.Req.Question[0].String())
 	err := s.dnsProxy.Resolve(d)
 	if err != nil {
 		ctx.err = err

@@ -273,3 +273,73 @@ func SplitHost(hostport string) (host string, err error) {
 
 	return host, nil
 }
+
+// charToHex converts character to a hexadecimal.
+func charToHex(n byte) int8 {
+	if n >= '0' && n <= '9' {
+		return int8(n) - '0'
+	} else if (n|0x20) >= 'a' && (n|0x20) <= 'f' {
+		return (int8(n) | 0x20) - 'a' + 10
+	}
+	return -1
+}
+
+// ipParseARPA6 parse IPv6 reverse address
+func ipParseARPA6(s string) (ip6 net.IP) {
+	if len(s) != 63 {
+		return nil
+	}
+
+	ip6 = make(net.IP, 16)
+
+	for i := 0; i != 64; i += 4 {
+		// parse "0.1."
+		n := charToHex(s[i])
+		n2 := charToHex(s[i+2])
+		if s[i+1] != '.' || (i != 60 && s[i+3] != '.') ||
+			n < 0 || n2 < 0 {
+			return nil
+		}
+
+		ip6[16-i/4-1] = byte(n2<<4) | byte(n&0x0f)
+	}
+	return ip6
+}
+
+// ipReverse inverts byte order of ip.
+func ipReverse(ip net.IP) (rev net.IP) {
+	ipLen := len(ip)
+	rev = make(net.IP, ipLen)
+	for i, b := range ip {
+		rev[ipLen-i-1] = b
+	}
+
+	return rev
+}
+
+// UnreverseAddr tries to convert reversed ARPA to a normal IP address.
+func UnreverseAddr(arpa string) (unreversed net.IP) {
+	const arpaV4 = ".in-addr.arpa"
+	const arpaV6 = ".ip6.arpa"
+
+	// Unify the input data.
+	arpa = strings.TrimSuffix(arpa, ".")
+	arpa = strings.ToLower(arpa)
+
+	if strings.HasSuffix(arpa, arpaV4) {
+		ip := strings.TrimSuffix(arpa, arpaV4)
+		ip4 := net.ParseIP(ip).To4()
+		if ip4 == nil {
+			return nil
+		}
+
+		return ipReverse(ip4)
+
+	} else if strings.HasSuffix(arpa, arpaV6) {
+		ip := strings.TrimSuffix(arpa, arpaV6)
+		return ipParseARPA6(ip)
+	}
+
+	// The suffix unrecognizable.
+	return nil
+}
